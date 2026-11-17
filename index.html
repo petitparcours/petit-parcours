@@ -740,14 +740,27 @@ function lettersWord(i){const [a,w]=splitArt(i.fr);return /^[a-zàâçéèêëî
 function scramble(arr){for(let k=0;k<10;k++){const s=shuffle(arr);if(s.join('|')!==arr.join('|'))return s}return[...arr].reverse()}
 function gapInfo(i){const toks=i.fr.split(' ');if(toks.length<3)return null;let best=-1,bl=0;toks.forEach((w,k)=>{const c=w.replace(/[.?!,]/g,'');if(LOW.test(c)&&c.length>bl){bl=c.length;best=k}});if(best<0||bl<3)return null;const word=toks[best].replace(/[.?!,]/g,'');return{fr:i.fr,de:i.de,word,shown:toks.map((w,k)=>k===best?'_____'+w.slice(word.length):w).join(' ')}}
 function wordsFrom(list,exclude){return[...new Set(list.flatMap(x=>x.fr.split(' ').map(w=>w.replace(/[.?!,]/g,''))).filter(w=>LOW.test(w)&&w.length>=4&&!exclude.includes(w)))]}
-function distract(item,key,n){const same=ITEMS.filter(i=>i.topic===item.topic&&i.id!==item.id&&i[key]!==item[key]);const pool=shuffle(same.length>=n?same:ITEMS.filter(i=>i.mag===item.mag&&i.id!==item.id&&i[key]!==item[key]));return[...new Set(pool.map(i=>i[key]))].slice(0,n)}
+// Ablenker, die man nicht einfach ausschliessen kann: gleiches Thema, gleiche Form, ähnliche Länge
+const artOf=t=>{const m=t.match(/^(un|une|le|la|les|des|l’|ein|eine|einen|der|die|das)\b/i);return m?m[1].toLowerCase():''};
+const wc=t=>t.split(' ').length;
+function simScore(a,b,key){const x=a[key],y=b[key];let s=0;
+ if(a.topic===b.topic)s+=4;else if(a.mag===b.mag)s+=1;
+ if(artOf(x)===artOf(y))s+=2;if(wc(x)===wc(y))s+=2;else s-=Math.min(3,Math.abs(wc(x)-wc(y)));
+ s-=Math.abs(x.length-y.length)/4;if(/[?.!]$/.test(x)===/[?.!]$/.test(y))s+=1;
+ const cx=x.replace(/^(un|une|le|la|les|des) |^l’/,''),cy=y.replace(/^(un|une|le|la|les|des) |^l’/,'');
+ if(cx[0]&&cx[0].toLowerCase()===(cy[0]||'').toLowerCase())s+=1;if(cx.slice(-2)===cy.slice(-2))s+=1;
+ if(S.items[b.id])s+=.5;return s+Math.random()*1.5}
+function distract(item,key,n){const seen=new Set([item[key]]);
+ const c=ITEMS.filter(i=>i.id!==item.id&&i[key]!==item[key]&&i.de!==item.de&&i.fr!==item.fr&&(i.mag<=item.mag||S.items[i.id]))
+  .map(i=>({i,s:simScore(item,i,key)})).sort((a,b)=>b.s-a.s);
+ const out=[];for(const {i} of c){if(out.length>=n)break;if(seen.has(i[key]))continue;seen.add(i[key]);out.push(i[key])}return out}
 const isPhrase=it=>it.fr.split(' ').length>=3;
 
 // Übungsformen
 function hearTask(item,intro){const box=S.items[item.id]?.box||0,base={slot:'hear',item,say:item.fr};
  const v=intro?'choice':pick1(box>=1?['choice','reverse','listen','tf']:['choice','listen','tf']);
- if(v==='choice')return{...base,kind:'choice',ask:'Hör zu. Was bedeutet das?',prompt:item.fr,autoSay:true,answer:item.de,options:shuffle([item.de,...distract(item,'de',2)])};
- if(v==='reverse')return{...base,kind:'choice',noSay:true,ask:'Wie sagt man das auf Französisch?',prompt:item.de,answer:item.fr,options:shuffle([item.fr,...distract(item,'fr',2)])};
+ if(v==='choice')return{...base,kind:'choice',ask:'Hör zu. Was bedeutet das?',prompt:item.fr,autoSay:true,answer:item.de,options:shuffle([item.de,...distract(item,'de',intro?2:3)])};
+ if(v==='reverse')return{...base,kind:'choice',noSay:true,ask:'Wie sagt man das auf Französisch?',prompt:item.de,answer:item.fr,options:shuffle([item.fr,...distract(item,'fr',3)])};
  if(v==='listen')return{...base,kind:'listen',ask:'Nur hören. Was bedeutet das?',prompt:'',autoSay:true,answer:item.de,options:shuffle([item.de,...distract(item,'de',3)])};
  const other=distract(item,'de',1)[0],truth=Math.random()<.5||!other;
  return{...base,kind:'tf',ask:'Stimmt die Übersetzung?',prompt:item.fr,sub:'= '+(truth?item.de:other),autoSay:true,answer:truth?'Stimmt':'Stimmt nicht',options:['Stimmt','Stimmt nicht'],why:`${item.fr} = ${item.de}`}}
@@ -761,8 +774,12 @@ function writeTask(item,fresh){const box=S.items[item.id]?.box||0,base={slot:'wr
 function dicteeTask(item){return{slot:'write',kind:'dictee',item,say:item.fr,answer:item.fr,autoSay:true,ask:'Diktat: Hör gut zu und schreib, was du hörst.',prompt:''}}
 function speakTask(item){return{kind:'speak',slot:'speak',item,ask:'Sag es laut. Dann hör zur Kontrolle.',prompt:item.de,say:item.fr,answer:item.fr}}
 function grammarTask(g){return{kind:'grammar',slot:'grammar',g,ask:g.ask,skill:g.skill,prompt:g.prompt,say:g.say,answer:g.answer,options:shuffle(g.options),why:g.why}}
-function gapTask(item){const gi=gapInfo(item);if(!gi)return null;const d=shuffle(wordsFrom(ITEMS.filter(x=>x.topic!==item.topic&&(x.mag===item.mag||S.items[x.id])),[gi.word])).slice(0,2);if(d.length<2)return null;
- return{slot:'mix',kind:'gap',item,ask:'Welches Wort fehlt?',prompt:gi.shown,sub:item.de,say:item.fr,answer:gi.word,options:shuffle([gi.word,...d]),why:item.fr}}
+function gapTask(item){const gi=gapInfo(item);if(!gi)return null;const w=gi.word;
+ const inS=item.fr.toLowerCase().split(/[ ’'.,?!]+/);const pool=wordsFrom(ITEMS.filter(x=>x.id!==item.id&&(x.mag<=item.mag||S.items[x.id])),[w]).filter(v=>!inS.includes(v));
+ const topicW=new Set(wordsFrom(ITEMS.filter(x=>x.topic===item.topic&&x.id!==item.id),[w]));
+ const sc=v=>(topicW.has(v)?3:0)+(v.slice(-2)===w.slice(-2)?3:0)+(v.slice(-1)===w.slice(-1)?1:0)-Math.abs(v.length-w.length)/2+(v[0]===w[0]?1:0)+Math.random()*1.5;
+ const d=pool.map(v=>[v,sc(v)]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);if(d.length<2)return null;
+ return{slot:'mix',kind:'gap',item,ask:'Welches Wort fehlt?',prompt:gi.shown,sub:item.de,say:item.fr,answer:w,options:shuffle([w,...d]),why:item.fr}}
 function pairsTask(cands){const f=new Set(),d=new Set(),its=[];for(const i of cands){if(its.length>=5)break;if(i.fr.length>26||i.de.length>28||f.has(i.fr)||d.has(i.de))continue;f.add(i.fr);d.add(i.de);its.push(i)}
  if(its.length<4)return null;const idx=its.map((_,k)=>k);
  return{kind:'pairs',slot:'pairs',multi:true,ask:'Finde die Paare. Tippe links ein Wort an, dann rechts die Übersetzung.',items:its,L:shuffle(idx),Rr:scramble(idx)}}
@@ -770,13 +787,16 @@ const isNoun=(i,a)=>i.fr.startsWith(a+' ')&&!/[.?!,]/.test(i.fr)&&i.fr.split(' '
 function sortTask(pool){for(const [a,b] of shuffle([['un','une'],['le','la']])){const A=shuffle(pool.filter(i=>isNoun(i,a))),B=shuffle(pool.filter(i=>isNoun(i,b)));
  if(A.length>=2&&B.length>=2){const n=Math.min(3,A.length,B.length);const its=shuffle([...A.slice(0,n),...B.slice(0,n)]);
   return{kind:'sort',slot:'mix',multi:true,ask:`${a} oder ${b}? Tippe ein Wort an und dann den richtigen Korb.`,buckets:[a,b],items:its.map(i=>({id:i.id,w:i.fr.slice(i.fr.indexOf(' ')+1),art:i.fr.split(' ')[0],fr:i.fr}))}}}return null}
-const ODD={mois:1,materiel:2,evenements:2,ecole:2,nombres:1,couleurs:1,marche:2,jours:1,corps:2,paysage:2,maison:4,verbes:1,bouger:1,sports:2};
-const KIND=t=>t==='verbes'||t==='bouger'?'verb':t;
-const oddOk=i=>{const m=ODD[i.topic];return m&&i.fr.split(' ').length<=m&&!/[.?!]/.test(i.fr)};
-function oddTask(pool){const by={};pool.filter(oddOk).forEach(i=>(by[i.topic]=by[i.topic]||[]).push(i));
- const ts=shuffle(Object.keys(by).filter(t=>by[t].length>=3));for(const t of ts){const others=pool.filter(i=>oddOk(i)&&KIND(i.topic)!==KIND(t));if(!others.length)continue;
-  const odd=pick1(others),three=shuffle(by[t]).slice(0,3);
-  return{kind:'odd',slot:'mix',multi:true,ask:'Was passt nicht dazu?',prompt:'',options:shuffle([...three.map(i=>i.fr),odd.fr]),answer:odd.fr,why:`${odd.fr} (${odd.de}) gehört zu «${topicName(odd.topic)}». Die anderen gehören zu «${topicName(t)}».`}}return null}
+const ODD_NO=new Set(['le loup','une feuille','une table','un élastique','des ciseaux','un œuf','le temps','la ferme']);
+const ODD={mois:'zeit',jours:'zeit',ecole:'ding',materiel:'ding',maison:'ding',marche:'ding',corps:'ding',paysage:'ding',evenements:'ding'};
+const shapeOf=i=>{const a=artOf(i.fr);return(a==='un'||a==='une'?'indef':a?'def':'none')+wc(i.fr)};
+const oddOk=i=>ODD[i.topic]&&wc(i.fr)<=3&&!/[.?!]/.test(i.fr)&&!ODD_NO.has(i.fr);
+function oddTask(pool){const all=ITEMS.filter(i=>oddOk(i)&&(pool.includes(i)||S.items[i.id]));const by={};all.forEach(i=>{const k=i.topic+'|'+shapeOf(i);(by[k]=by[k]||[]).push(i)});
+ for(const k of shuffle(Object.keys(by).filter(k=>by[k].length>=3))){const [t,sh]=k.split('|');
+  const others=all.filter(i=>i.topic!==t&&ODD[i.topic]===ODD[t]&&shapeOf(i)===sh);if(!others.length)continue;
+  const odd=pick1(others),three=shuffle(by[k]).slice(0,3),four=[...three,odd];
+  return{kind:'odd',slot:'mix',multi:true,ask:'Was passt nicht dazu? Überlege, was die Wörter bedeuten.',prompt:'',options:shuffle(four.map(i=>i.fr)),answer:odd.fr,
+   why:`${odd.fr} (${odd.de}) gehört zu «${topicName(odd.topic)}». Die anderen gehören zu «${topicName(t)}»: ${three.map(i=>i.fr+' = '+i.de).join(', ')}.`}}return null}
 
 // Runde: 10 Aufgaben in wechselnden Formen
 function buildRound(magFilter){
