@@ -830,11 +830,58 @@ function lev(a,b){const d=Array.from({length:a.length+1},(_,i)=>[i,...Array(b.le
 function colored(t){return esc(t).replace(/^(un) /,'<span class="un">$1</span> ').replace(/^(une) /,'<span class="une">$1</span> ')}
 function ruleCard(skill){const r=RULES[skill];if(!r)return'';return `<div class="rule"><strong>${esc(r.t)}</strong><p>${esc(r.x)}</p><ul>${r.ex.map(([a,b])=>`<li><span>${colored(a)}</span><span class="muted">${esc(b)}</span></li>`).join('')}</ul></div>`}
 
+// Test üben: Französisch sehen, auf Deutsch sagen, Lösung aufdecken
+let T=null,testMag=null,testSel=null;
+function testItems(){return ITEMS.filter(i=>i.mag===testSel.mag&&testSel.set.has(i.topic))}
+function testHTML(){const m=magOf(testMag||currentMag());if(!testSel||testSel.mag!==m.id)testSel={mag:m.id,set:new Set(m.topics.map(t=>t.id))};const n=testItems().length;
+ return `<section class="start"><h2>Für den Test üben</h2><p class="muted">Du siehst ein Wort oder einen Satz auf Französisch und sagst laut, was es auf Deutsch heisst. Dann deckst du die Lösung auf. Ab und zu kommt es umgekehrt oder als Auswahl. Was du noch nicht weisst, kommt am Schluss nochmal.</p>
+ <div><strong>Magazine</strong><div class="chips" style="margin-top:8px">${MAGS.map(x=>`<button class="chip" data-tmag="${x.id}" aria-pressed="${x.id===m.id}">${x.id}</button>`).join('')}</div></div>
+ <div><strong>${esc(m.id)} – ${esc(m.title)}</strong><p class="muted" style="margin:4px 0 6px">Wähle, was im Test vorkommt.</p>
+ <div class="list">${m.topics.map(t=>`<label class="row" style="cursor:pointer"><div><input type="checkbox" data-ttop="${t.id}" ${testSel.set.has(t.id)?'checked':''} style="width:22px;height:22px;vertical-align:middle;margin-right:10px">${esc(t.name)}${t.pages?` <span class="muted">· Seiten ${esc(t.pages)}</span>`:''}</div><span class="muted">${t.items.length}</span></label>`).join('')}</div>
+ <div class="actions" style="margin-top:8px"><button class="plain" id="tall">Alle</button><button class="plain" id="tnone">Keine</button></div></div>
+ <button class="big" id="tgo" ${n?'':'disabled'}>Üben (${n} ${n===1?'Wort':'Wörter'})</button></section>`}
+function testTask(item,forceDe){const r=Math.random();const kind=forceDe?'de':r<.7?'de':r<.85?'fr':'mc';
+ if(kind==='mc')return{kind,item,options:shuffle([item.de,...distract(item,'de',3)])};return{kind,item}}
+function startTest(items){const list=shuffle(items||testItems());T={list,queue:list.map(i=>testTask(i)),i:0,first:new Map(),wrong:new Set(),shown:false,pick:null};view='test';renderTest();window.scrollTo(0,0)}
+function renderTest(){const t=T.queue[T.i];if(!t)return renderTestEnd();const it=t.item,n=T.queue.length;
+ const top=`<div class="head"><button class="plain" id="tstop">Beenden</button><div class="dots" style="flex:1"><i class="on" style="flex:${T.i}"></i><i style="flex:${Math.max(0,n-T.i)}"></i></div><span class="muted">${T.i+1}/${n}</span></div>`;
+ let body='',foot='';const again=t.again?'<p class="muted">Nochmal – jetzt weisst du es bestimmt.</p>':'';
+ if(t.kind==='de'||t.kind==='fr'){const q=t.kind==='de'?it.fr:it.de,a=t.kind==='de'?it.de:it.fr;
+  body=`<div class="ask">${t.kind==='de'?'Was heisst das auf Deutsch? Sag es laut.':'Wie heisst das auf Französisch? Sag es laut.'}</div>${again}<div class="prompt">${t.kind==='de'?colored(q):esc(q)}</div>${t.kind==='de'?`<button class="plain say" data-say="${esc(it.fr)}">🔊 Anhören</button>`:''}
+  ${T.shown?`<div class="fb ok" style="font-size:1.4rem">${t.kind==='fr'?colored(a):esc(a)}</div>`:''}`;
+  foot=T.shown?`<p class="muted">Hast du es gewusst?</p><div class="actions"><button class="big" id="tyes">Gewusst</button><button class="plain" id="tno">Noch nicht</button></div>`:`<div class="actions"><button class="big" id="tshow">Lösung zeigen</button></div>`}
+ else{body=`<div class="ask">Was heisst das auf Deutsch?</div>${again}<div class="prompt">${colored(it.fr)}</div><button class="plain say" data-say="${esc(it.fr)}">🔊 Anhören</button>
+  <div class="opts">${t.options.map((o,k)=>`<button class="opt ${T.pick!==null?(o===it.de?'right':o===T.pick?'wrong':''):''}" data-topt="${k}" ${T.pick!==null?'disabled':''}>${esc(o)}</button>`).join('')}</div>`;
+  if(T.pick!==null)foot=`<div class="actions"><button class="big" id="tnext">Weiter</button></div>`}
+ app.innerHTML=top+`<section class="task">${body}${foot}</section>`;
+ app.querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>speak(b.dataset.say));
+ $('#tstop').onclick=()=>{T=null;view='test';render()};
+ $('#tshow')&&($('#tshow').onclick=()=>{T.shown=true;renderTest();if(t.kind==='fr')speak(it.fr)});
+ $('#tyes')&&($('#tyes').onclick=()=>testAnswer(true));$('#tno')&&($('#tno').onclick=()=>testAnswer(false));
+ app.querySelectorAll('[data-topt]').forEach(b=>b.onclick=()=>{T.pick=t.options[+b.dataset.topt];renderTest();speak(it.fr)});
+ $('#tnext')&&($('#tnext').onclick=()=>testAnswer(T.pick===it.de));
+ if(t.kind!=='fr'&&!T.shown&&T.pick===null)setTimeout(()=>speak(it.fr),250)}
+function testAnswer(ok){const t=T.queue[T.i];if(!T.first.has(t.item.id))T.first.set(t.item.id,ok);
+ if(!ok){T.wrong.add(t.item.id);T.queue.push({...testTask(t.item,true),again:true})}
+ T.i++;T.shown=false;T.pick=null;renderTest();window.scrollTo(0,0)}
+function renderTestEnd(){const n=T.list.length,ok=T.list.filter(i=>T.first.get(i.id)).length,w=T.list.filter(i=>T.wrong.has(i.id));
+ app.innerHTML=`<section class="start"><h2>${ok===n?'Super, alles gewusst!':ok/n>=.75?'Sehr gut!':'Gut geübt!'}</h2><p class="muted">${ok} von ${n} beim ersten Mal gewusst.</p>
+ ${w.length?`<h3>Diese Wörter nochmal anschauen</h3><div class="list">${w.map(i=>`<div class="row"><div><strong>${colored(i.fr)}</strong><div class="muted">${esc(i.de)}</div></div><button class="plain" data-say="${esc(i.fr)}">Anhören</button></div>`).join('')}</div>`:''}
+ <div class="actions">${w.length?`<button class="big" id="twrong">Nur diese nochmal</button>`:''}<button class="plain" id="tagain">Alles nochmal</button><button class="plain" id="tend">Fertig</button></div></section>`;
+ app.querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>speak(b.dataset.say));
+ $('#twrong')&&($('#twrong').onclick=()=>startTest(w));$('#tagain').onclick=()=>startTest(T.list);$('#tend').onclick=()=>{T=null;view='test';render()}}
+function bindTest(){app.querySelectorAll('[data-tmag]').forEach(b=>b.onclick=()=>{testMag=b.dataset.tmag;render()});
+ app.querySelectorAll('[data-ttop]').forEach(c=>c.onchange=()=>{c.checked?testSel.set.add(c.dataset.ttop):testSel.set.delete(c.dataset.ttop);render()});
+ $('#tall')&&($('#tall').onclick=()=>{testSel.set=new Set(magOf(testSel.mag).topics.map(t=>t.id));render()});
+ $('#tnone')&&($('#tnone').onclick=()=>{testSel.set=new Set();render()});
+ $('#tgo')&&($('#tgo').onclick=()=>startTest())}
+
 // Ansichten
-function nav(){return `<header class="top"><h1 class="brand"><img src="${LOGO}" alt="" width="56" height="56">Petit Parcours</h1><nav class="tabs" aria-label="Bereiche">${[['home','Üben'],['learn','Lernen'],['sheet','Arbeitsblatt'],['parents','Eltern']].map(([v,l])=>`<button class="tab" data-view="${v}" ${view===v?'aria-current="page"':''}>${l}</button>`).join('')}</nav></header>${TEST?`<p class="fb no">Testmodus: Es wird nichts gespeichert.</p>`:''}`}
-function render(){ if(R)return renderTask();
- app.innerHTML=nav()+(view==='home'?homeHTML():view==='learn'?learnHTML():view==='sheet'?sheetHTML():view==='mission'?missionHTML():parentsHTML());
+function nav(){return `<header class="top"><h1 class="brand"><img src="${LOGO}" alt="" width="56" height="56">Petit Parcours</h1><nav class="tabs" aria-label="Bereiche">${[['home','Üben'],['test','Test'],['learn','Lernen'],['sheet','Arbeitsblatt'],['parents','Eltern']].map(([v,l])=>`<button class="tab" data-view="${v}" ${view===v?'aria-current="page"':''}>${l}</button>`).join('')}</nav></header>${TEST?`<p class="fb no">Testmodus: Es wird nichts gespeichert.</p>`:''}`}
+function render(){ if(R)return renderTask();if(T)return renderTest();
+ app.innerHTML=nav()+(view==='test'?testHTML():view==='home'?homeHTML():view==='learn'?learnHTML():view==='sheet'?sheetHTML():view==='mission'?missionHTML():parentsHTML());
  app.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{view=b.dataset.view;msg='';render();window.scrollTo(0,0)});
+ if(view==='test')bindTest();
  app.querySelector('#go')?.addEventListener('click',()=>startRound());
  app.querySelectorAll('[data-mag]').forEach(b=>b.onclick=()=>startRound(b.dataset.mag));
  app.querySelectorAll('[data-learn]').forEach(b=>b.onclick=()=>{learnMag=b.dataset.learn;view='learn';render();window.scrollTo(0,0)});
